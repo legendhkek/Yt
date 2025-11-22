@@ -45,7 +45,8 @@ try:
     from config import (
         BOT_TOKEN, BOT_NAME, BOT_VERSION, DATABASE_FILE, 
         LOG_FILE, ADMIN_IDS, OWNER_ID, MIN_VIEW_TIME,
-        MAX_VIEW_TIME, DEFAULT_VIEW_TIME, RATE_LIMIT_VISITS_PER_MINUTE,
+        MAX_VIEW_TIME, DEFAULT_VIEW_TIME, MIN_VIEW_COUNT,
+        MAX_VIEW_COUNT, DEFAULT_VIEW_COUNT, RATE_LIMIT_VISITS_PER_MINUTE,
         RATE_LIMIT_VISITS_PER_HOUR, RATE_LIMIT_VISITS_PER_DAY,
         PROXY_TIMEOUT, PROXY_POOL_SIZE, MAX_WORKERS,
         MESSAGES, Config, validate_config
@@ -86,6 +87,9 @@ if not MODULES_LOADED:
     MIN_VIEW_TIME = 5
     MAX_VIEW_TIME = 3600
     DEFAULT_VIEW_TIME = 30
+    MIN_VIEW_COUNT = 1
+    MAX_VIEW_COUNT = 1000
+    DEFAULT_VIEW_COUNT = 100
     RATE_LIMIT_VISITS_PER_MINUTE = 15
     RATE_LIMIT_VISITS_PER_HOUR = 150
     RATE_LIMIT_VISITS_PER_DAY = 1000
@@ -929,6 +933,33 @@ class TelegramBotHandlers:
             logger.error(f"Error in history_command: {e}")
             await update.message.reply_text("❌ Error retrieving history. Please try again.")
     
+    async def settings_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /settings command"""
+        try:
+            user_id = update.effective_user.id
+            
+            settings_text = (
+                "⚙️ *Bot Settings*\n\n"
+                "*Current Limits:*\n"
+                f"• Per minute: {RATE_LIMIT_VISITS_PER_MINUTE} requests\n"
+                f"• Per hour: {RATE_LIMIT_VISITS_PER_HOUR} requests\n"
+                f"• Per day: {RATE_LIMIT_VISITS_PER_DAY} requests\n\n"
+                "*View Settings:*\n"
+                f"• Min view time: {MIN_VIEW_TIME}s\n"
+                f"• Max view time: {MAX_VIEW_TIME}s\n"
+                f"• Default view time: {DEFAULT_VIEW_TIME}s\n\n"
+                f"• Min views: {MIN_VIEW_COUNT}\n"
+                f"• Max views: {MAX_VIEW_COUNT}\n"
+                f"• Default views: {DEFAULT_VIEW_COUNT}\n\n"
+                "Contact admin to adjust settings."
+            )
+            
+            await update.message.reply_text(settings_text, parse_mode=ParseMode.MARKDOWN)
+        
+        except Exception as e:
+            logger.error(f"Error in settings_command: {e}")
+            await update.message.reply_text("❌ Error retrieving settings. Please try again.")
+    
     async def views_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /views command - start conversation"""
         try:
@@ -1233,6 +1264,28 @@ class AdminCommands:
         except Exception as e:
             logger.error(f"Error in refresh_proxies_command: {e}")
             await update.message.reply_text("❌ Error refreshing proxies.")
+    
+    async def users_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /users command"""
+        try:
+            if not await self.is_admin(update.effective_user.id):
+                await update.message.reply_text("❌ You don't have permission to use this command.")
+                return
+            
+            stats = self.db.get_statistics()
+            
+            users_text = (
+                "👥 *User Statistics*\n\n"
+                f"Total Users: {stats.get('total_users', 0)}\n"
+                f"Total Requests: {stats.get('total_requests', 0)}\n"
+                f"Completed Requests: {stats.get('completed_requests', 0)}\n"
+            )
+            
+            await update.message.reply_text(users_text, parse_mode=ParseMode.MARKDOWN)
+        
+        except Exception as e:
+            logger.error(f"Error in users_command: {e}")
+            await update.message.reply_text("❌ Error retrieving user statistics.")
 
 # ============================================================================
 # MAIN BOT APPLICATION
@@ -1312,12 +1365,14 @@ class TelegramYouTubeBot:
         self.application.add_handler(CommandHandler("help", self.handlers.help_command))
         self.application.add_handler(CommandHandler("stats", self.handlers.stats_command))
         self.application.add_handler(CommandHandler("history", self.handlers.history_command))
+        self.application.add_handler(CommandHandler("settings", self.handlers.settings_command))
         
         # Conversation handler for views (includes its own callback handler)
         self.application.add_handler(views_conv_handler)
         
         # Admin commands
         self.application.add_handler(CommandHandler("botstats", self.admin_commands.botstats_command))
+        self.application.add_handler(CommandHandler("users", self.admin_commands.users_command))
         self.application.add_handler(CommandHandler("proxies", self.admin_commands.proxies_command))
         self.application.add_handler(CommandHandler("refresh_proxies", self.admin_commands.refresh_proxies_command))
         
