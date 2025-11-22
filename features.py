@@ -13,6 +13,7 @@ import time
 import logging
 import threading
 import sqlite3
+import re
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Callable
 from collections import defaultdict
@@ -366,17 +367,33 @@ class PluginManager:
             os.makedirs(plugins_dir)
     
     def load_plugin(self, plugin_name: str) -> bool:
-        """Load a plugin"""
+        """Load a plugin with validation"""
         try:
+            # Validate plugin name (alphanumeric and underscore only)
+            if not re.match(r'^[a-zA-Z0-9_]+$', plugin_name):
+                logger.error(f"Invalid plugin name: {plugin_name}")
+                return False
+            
             plugin_path = os.path.join(self.plugins_dir, f"{plugin_name}.py")
             
             if not os.path.exists(plugin_path):
                 logger.error(f"Plugin file not found: {plugin_path}")
                 return False
             
-            # Import plugin
+            # Security: Check that plugin_path is within plugins_dir
+            real_plugin_path = os.path.realpath(plugin_path)
+            real_plugins_dir = os.path.realpath(self.plugins_dir)
+            if not real_plugin_path.startswith(real_plugins_dir):
+                logger.error(f"Security: Plugin path outside plugins directory: {plugin_path}")
+                return False
+            
+            # Import plugin in restricted manner
             import importlib.util
             spec = importlib.util.spec_from_file_location(plugin_name, plugin_path)
+            if spec is None or spec.loader is None:
+                logger.error(f"Cannot load plugin spec: {plugin_name}")
+                return False
+            
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             

@@ -811,7 +811,7 @@ class TelegramBotHandlers:
             
             # Use welcome message from config if available, otherwise use default
             welcome_text = ''
-            if MODULES_LOADED and hasattr(MESSAGES, '__getitem__'):
+            if MODULES_LOADED and isinstance(MESSAGES, dict):
                 welcome_text = MESSAGES.get('welcome', '')
             
             # Fallback message if config not available or empty

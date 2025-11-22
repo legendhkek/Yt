@@ -14,6 +14,7 @@ import time
 import hashlib
 import logging
 import threading
+import secrets
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Callable, Tuple
 from functools import wraps, lru_cache
@@ -251,7 +252,7 @@ class Validator:
         try:
             result = urlparse(url)
             return all([result.scheme, result.netloc])
-        except:
+        except Exception:
             return False
     
     @staticmethod
@@ -377,7 +378,6 @@ class SecurityUtils:
     @staticmethod
     def generate_token(length: int = 32) -> str:
         """Generate random token"""
-        import secrets
         return secrets.token_hex(length // 2)
     
     @staticmethod
