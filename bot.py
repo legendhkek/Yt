@@ -803,21 +803,27 @@ class TelegramBotHandlers:
             self.db.add_user(user.id, user.username, user.first_name, user.last_name)
             self.db.update_user_activity(user.id)
             
-            welcome_text = (
-                "🎬 *Welcome to YouTube View Bot!*\n\n"
-                "This bot helps you simulate views on YouTube videos.\n\n"
-                "*Available Commands:*\n"
-                "🔗 /start - Start the bot\n"
-                "📊 /stats - View your statistics\n"
-                "🎥 /views - Simulate views on a video\n"
-                "📋 /history - View your request history\n"
-                "ℹ️ /help - Get help\n"
-                "⚙️ /settings - Adjust settings\n\n"
-                "*Admin Commands:*\n"
-                "👥 /users - View total users\n"
-                "📈 /botstats - View bot statistics\n"
-                "🔄 /proxies - Manage proxies\n"
-            )
+            # Use welcome message from config if available
+            if MODULES_LOADED and hasattr(MESSAGES, '__getitem__'):
+                welcome_text = MESSAGES.get('welcome', '')
+            
+            # Fallback message if config not available
+            if not welcome_text:
+                welcome_text = (
+                    "🎬 *Welcome to YouTube View Bot!*\n\n"
+                    "This bot helps you simulate views on YouTube videos.\n\n"
+                    "*Available Commands:*\n"
+                    "🔗 /start - Start the bot\n"
+                    "📊 /stats - View your statistics\n"
+                    "🎥 /views - Simulate views on a video\n"
+                    "📋 /history - View your request history\n"
+                    "ℹ️ /help - Get help\n"
+                    "⚙️ /settings - Adjust settings\n\n"
+                    "*Admin Commands:*\n"
+                    "👥 /users - View total users\n"
+                    "📈 /botstats - View bot statistics\n"
+                    "🔄 /proxies - Manage proxies\n"
+                )
             
             keyboard = [
                 [InlineKeyboardButton("📊 My Stats", callback_data="stats"),
@@ -1267,6 +1273,7 @@ class TelegramYouTubeBot:
                 WAITING_FOR_CONFIRMATION: [CallbackQueryHandler(self.handlers.button_callback)],
             },
             fallbacks=[CommandHandler("cancel", self.cancel_handler)],
+            per_message=False,
         )
         
         # Command handlers
@@ -1310,7 +1317,7 @@ class TelegramYouTubeBot:
             except Exception as e:
                 logger.error(f"Error sending error message: {e}")
     
-    async def startup(self):
+    async def startup(self, application):
         """Startup tasks"""
         logger.info("Bot starting up...")
         
@@ -1321,7 +1328,7 @@ class TelegramYouTubeBot:
         
         logger.info("Bot startup completed")
     
-    async def shutdown(self):
+    async def shutdown(self, application):
         """Shutdown tasks"""
         logger.info("Bot shutting down...")
         self.proxy_manager.save_to_cache()

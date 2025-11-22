@@ -41,9 +41,22 @@ export TELEGRAM_BOT_TOKEN="your_bot_token_here"
 Or edit `config.py` to set your bot token and other settings.
 
 4. Run the bot:
+
+**Using the startup script (recommended):**
+```bash
+./start.sh
+```
+
+**Or directly with Python:**
 ```bash
 python3 bot.py
 ```
+
+The bot will automatically:
+- Load all modules (utils, features, config)
+- Initialize analytics, notifications, scheduler, and preferences
+- Start the Telegram bot polling
+- Begin accepting commands
 
 ## 📁 File Structure
 
