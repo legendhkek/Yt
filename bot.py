@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-COMPREHENSIVE TELEGRAM BOT WITH YOUTUBE INTEGRATION
-Full-featured production-ready Telegram bot with YouTube downloading, 
-user management, database integration, admin controls, and comprehensive error handling.
+TELEGRAM BOT WITH YOUTUBE VIEW SIMULATION
+Advanced Telegram bot with YouTube view simulation, proxy management,
+user management, database integration, and comprehensive features.
 
-Author: Manus Bot Development
-Version: 2.0
-Size: 150+ KB production code
+Author: @LEGEND_BL
+Version: 2.0 Advanced
+Main Entry Point - Starts all bot components
 """
 
 import os
@@ -31,6 +31,30 @@ from functools import wraps
 import re
 import base64
 
+# Import bot modules
+try:
+    from utils import (
+        LRUCache, Validator, Formatter, SecurityUtils,
+        retry_on_failure, rate_limit, timed_cache
+    )
+    from features import (
+        AnalyticsEngine, NotificationManager, TaskScheduler,
+        PluginManager, UserPreferences, CommandRegistry
+    )
+    from config import (
+        BOT_TOKEN, BOT_NAME, BOT_VERSION, DATABASE_FILE, 
+        LOG_FILE, ADMIN_IDS, OWNER_ID, MIN_VIEW_TIME,
+        MAX_VIEW_TIME, DEFAULT_VIEW_TIME, RATE_LIMIT_VISITS_PER_MINUTE,
+        RATE_LIMIT_VISITS_PER_HOUR, RATE_LIMIT_VISITS_PER_DAY,
+        PROXY_TIMEOUT, PROXY_POOL_SIZE, MAX_WORKERS,
+        MESSAGES, Config, validate_config
+    )
+    MODULES_LOADED = True
+    logging.info("✅ All bot modules loaded successfully")
+except ImportError as e:
+    MODULES_LOADED = False
+    logging.warning(f"⚠️ Could not import some modules: {e}. Running in standalone mode.")
+
 # Third-party imports
 import requests
 from requests.adapters import HTTPAdapter
@@ -40,51 +64,43 @@ import asyncio
 from bs4 import BeautifulSoup
 
 # Telegram imports
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, ChatAction
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters, ContextTypes, 
     ConversationHandler, CallbackQueryHandler, CallbackContext
 )
-from telegram.constants import ChatAction
-from telegram.error import TelegramError, BadRequest, Unauthorized
+from telegram.constants import ChatAction, ParseMode
+from telegram.error import TelegramError, BadRequest, Forbidden
 
 # ============================================================================
-# CONFIGURATION AND CONSTANTS
+# CONFIGURATION AND CONSTANTS (Loaded from config.py)
 # ============================================================================
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8057347461:AAHa2nmOZQIMf82V3gmpmcoWfyITsbD8-Sc")
-DATABASE_FILE = "telegram_bot.db"
+# Load configuration - use defaults if config module not available
+if not MODULES_LOADED:
+    BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8057347461:AAHa2nmOZQIMf82V3gmpmcoWfyITsbD8-Sc")
+    DATABASE_FILE = "telegram_bot.db"
+    LOG_FILE = "telegram_bot.log"
+    ADMIN_IDS = []
+    OWNER_ID = 5652614329
+    MIN_VIEW_TIME = 5
+    MAX_VIEW_TIME = 3600
+    DEFAULT_VIEW_TIME = 30
+    RATE_LIMIT_VISITS_PER_MINUTE = 15
+    RATE_LIMIT_VISITS_PER_HOUR = 150
+    RATE_LIMIT_VISITS_PER_DAY = 1000
+    PROXY_TIMEOUT = 12
+    PROXY_POOL_SIZE = 150
+    MAX_WORKERS = 75
+
+# Additional constants
 PROXY_CACHE_FILE = "proxy_cache.json"
 USERS_CACHE_FILE = "users_cache.json"
 STATS_FILE = "bot_stats.json"
-LOG_FILE = "telegram_bot.log"
-
-# Admin configuration
-ADMIN_IDS = []  # Add admin user IDs here
-OWNER_ID = 5652614329
-
-# View time constraints
-MIN_VIEW_TIME = 5
-MAX_VIEW_TIME = 3600
-DEFAULT_VIEW_TIME = 30
-
-# Rate limiting
-RATE_LIMIT_VISITS_PER_MINUTE = 15
-RATE_LIMIT_VISITS_PER_HOUR = 150
-RATE_LIMIT_VISITS_PER_DAY = 1000
-
-# Proxy settings
-PROXY_TIMEOUT = 12
 PROXY_VALIDATION_INTERVAL = 3600
 MAX_PROXY_FAILURES = 5
-PROXY_POOL_SIZE = 150
 MIN_PROXY_POOL_SIZE = 50
-
-# Threading
-MAX_WORKERS = 75
 THREAD_POOL_TIMEOUT = 45
-
-# Cache settings
 CACHE_EXPIRY = 3600
 MAX_CACHE_SIZE = 1000
 
@@ -1191,13 +1207,49 @@ class TelegramYouTubeBot:
     """Main Telegram YouTube bot application"""
     
     def __init__(self, token: str):
-        """Initialize bot"""
+        """Initialize bot and all components"""
         self.token = token
         self.db_manager = DatabaseManager()
         self.proxy_manager = ProxyManager()
         self.handlers = TelegramBotHandlers(self.db_manager, self.proxy_manager)
         self.admin_commands = AdminCommands(self.db_manager, self.proxy_manager)
         self.application = None
+        
+        # Initialize advanced features if modules are loaded
+        if MODULES_LOADED:
+            logger.info("🔧 Initializing advanced features...")
+            try:
+                self.analytics = AnalyticsEngine()
+                logger.info("  ✅ Analytics Engine initialized")
+            except Exception as e:
+                logger.warning(f"  ⚠️  Analytics Engine failed: {e}")
+                self.analytics = None
+            
+            try:
+                self.notifications = NotificationManager()
+                logger.info("  ✅ Notification Manager initialized")
+            except Exception as e:
+                logger.warning(f"  ⚠️  Notification Manager failed: {e}")
+                self.notifications = None
+            
+            try:
+                self.scheduler = TaskScheduler()
+                logger.info("  ✅ Task Scheduler initialized")
+            except Exception as e:
+                logger.warning(f"  ⚠️  Task Scheduler failed: {e}")
+                self.scheduler = None
+            
+            try:
+                self.preferences = UserPreferences()
+                logger.info("  ✅ User Preferences initialized")
+            except Exception as e:
+                logger.warning(f"  ⚠️  User Preferences failed: {e}")
+                self.preferences = None
+        else:
+            self.analytics = None
+            self.notifications = None
+            self.scheduler = None
+            self.preferences = None
     
     def setup_handlers(self):
         """Setup all bot handlers"""
@@ -1299,22 +1351,42 @@ class TelegramYouTubeBot:
 # ============================================================================
 
 def main():
-    """Main entry point"""
+    """Main entry point - Starts all bot components"""
     logger.info("=" * 80)
     logger.info("TELEGRAM YOUTUBE VIEW BOT - STARTING")
     logger.info("=" * 80)
+    logger.info(f"Version: {BOT_VERSION if MODULES_LOADED else '2.0'}")
+    logger.info(f"Author: @LEGEND_BL")
+    logger.info(f"Modules Loaded: {'✅ YES' if MODULES_LOADED else '⚠️  STANDALONE MODE'}")
+    logger.info("=" * 80)
+    
+    # Validate configuration
+    if MODULES_LOADED:
+        valid, message = validate_config()
+        if not valid:
+            logger.error(f"❌ Configuration validation failed: {message}")
+            sys.exit(1)
+        logger.info(f"✅ Configuration validated: {message}")
     
     if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
         logger.error("❌ BOT_TOKEN not configured. Please set TELEGRAM_BOT_TOKEN environment variable.")
+        logger.error("   Export it: export TELEGRAM_BOT_TOKEN='your_token_here'")
         sys.exit(1)
+    
+    logger.info("✅ Bot token configured")
+    logger.info(f"📊 Max Workers: {MAX_WORKERS}")
+    logger.info(f"🔄 Proxy Pool Size: {PROXY_POOL_SIZE}")
+    logger.info(f"⏱️  View Time: {MIN_VIEW_TIME}s - {MAX_VIEW_TIME}s")
+    logger.info("=" * 80)
     
     try:
         bot = TelegramYouTubeBot(BOT_TOKEN)
+        logger.info("🚀 Starting bot polling...")
         bot.run()
     except KeyboardInterrupt:
-        logger.info("Bot interrupted by user")
+        logger.info("\n👋 Bot interrupted by user - Shutting down gracefully")
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
+        logger.error(f"❌ Fatal error: {e}")
         traceback.print_exc()
         sys.exit(1)
 

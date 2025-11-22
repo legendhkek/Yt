@@ -37,7 +37,7 @@ LOG_FILE = os.getenv("LOG_FILE", "telegram_bot.log")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # Admin Configuration
-ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",")]
+ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
 OWNER_ID = int(os.getenv("OWNER_ID", "5652614329"))
 SUPPORT_CHAT_ID = int(os.getenv("SUPPORT_CHAT_ID", "0")) if os.getenv("SUPPORT_CHAT_ID") else None
 
