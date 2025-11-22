@@ -1066,8 +1066,12 @@ class TelegramBotHandlers:
     
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle button callbacks"""
+        query = None
         try:
             query = update.callback_query
+            if not query:
+                return
+                
             await query.answer()
             
             user_id = query.from_user.id
@@ -1089,6 +1093,7 @@ class TelegramBotHandlers:
                 if user_id in self.user_sessions:
                     del self.user_sessions[user_id]
                 await query.edit_message_text("❌ Request cancelled.")
+                return ConversationHandler.END
             
             elif query.data.startswith("confirm_views_"):
                 if user_id in self.user_sessions:
@@ -1107,28 +1112,45 @@ class TelegramBotHandlers:
                         session['time']
                     )
                     
-                    # Simulate views
-                    results = self.youtube_simulator.simulate_views_batch(
-                        session['url'],
-                        session['views'],
-                        session['time']
-                    )
-                    
-                    result_text = (
-                        "✅ *Process Completed*\n\n"
-                        f"👁️ Total Views: {results['total']}\n"
-                        f"✅ Successful: {results['successful']}\n"
-                        f"❌ Failed: {results['failed']}\n"
-                        f"Success Rate: {(results['successful']/results['total']*100):.1f}%\n"
-                    )
-                    
-                    await query.edit_message_text(result_text, parse_mode=ParseMode.MARKDOWN)
-                    
-                    del self.user_sessions[user_id]
+                    # Simulate views in background to avoid blocking
+                    try:
+                        results = self.youtube_simulator.simulate_views_batch(
+                            session['url'],
+                            session['views'],
+                            session['time']
+                        )
+                        
+                        result_text = (
+                            "✅ *Process Completed*\n\n"
+                            f"👁️ Total Views: {results['total']}\n"
+                            f"✅ Successful: {results['successful']}\n"
+                            f"❌ Failed: {results['failed']}\n"
+                            f"Success Rate: {(results['successful']/results['total']*100):.1f}%\n"
+                        )
+                        
+                        await query.edit_message_text(result_text, parse_mode=ParseMode.MARKDOWN)
+                    except Exception as e:
+                        logger.error(f"Error simulating views: {e}")
+                        await query.edit_message_text(
+                            f"❌ Error processing views: {str(e)}\n"
+                            "Please try again later."
+                        )
+                    finally:
+                        if user_id in self.user_sessions:
+                            del self.user_sessions[user_id]
+                else:
+                    await query.edit_message_text("❌ Session expired. Please use /views again.")
         
+        except BadRequest as e:
+            logger.warning(f"Bad request in button_callback: {e}")
+            # Message might have been deleted or edited
         except Exception as e:
             logger.error(f"Error in button_callback: {e}")
-            await query.answer("❌ Error processing request", show_alert=True)
+            if query:
+                try:
+                    await query.answer("❌ Error processing request", show_alert=True)
+                except Exception:
+                    pass  # Query might have already been answered
 
 # ============================================================================
 # ADMIN COMMANDS
@@ -1280,6 +1302,8 @@ class TelegramYouTubeBot:
                 WAITING_FOR_CONFIRMATION: [CallbackQueryHandler(self.handlers.button_callback)],
             },
             fallbacks=[CommandHandler("cancel", self.cancel_handler)],
+            per_user=True,
+            per_chat=True,
             per_message=False,
         )
         
@@ -1288,6 +1312,8 @@ class TelegramYouTubeBot:
         self.application.add_handler(CommandHandler("help", self.handlers.help_command))
         self.application.add_handler(CommandHandler("stats", self.handlers.stats_command))
         self.application.add_handler(CommandHandler("history", self.handlers.history_command))
+        
+        # Conversation handler for views (includes its own callback handler)
         self.application.add_handler(views_conv_handler)
         
         # Admin commands
@@ -1295,8 +1321,8 @@ class TelegramYouTubeBot:
         self.application.add_handler(CommandHandler("proxies", self.admin_commands.proxies_command))
         self.application.add_handler(CommandHandler("refresh_proxies", self.admin_commands.refresh_proxies_command))
         
-        # Callback handlers
-        self.application.add_handler(CallbackQueryHandler(self.handlers.button_callback))
+        # Callback handlers for buttons outside conversation (with lower priority)
+        self.application.add_handler(CallbackQueryHandler(self.handlers.button_callback), group=1)
         
         # Error handler
         self.application.add_error_handler(self.error_handler)
@@ -1326,14 +1352,23 @@ class TelegramYouTubeBot:
     
     async def startup(self, application):
         """Startup tasks"""
-        logger.info("Bot starting up...")
-        
-        # Load proxies from cache
-        if not self.proxy_manager.load_from_cache():
-            logger.info("No cached proxies found, refreshing proxy pool...")
-            self.proxy_manager.refresh_proxies()
-        
-        logger.info("Bot startup completed")
+        try:
+            logger.info("Bot starting up...")
+            
+            # Load proxies from cache
+            try:
+                if not self.proxy_manager.load_from_cache():
+                    logger.info("No cached proxies found, refreshing proxy pool...")
+                    # Refresh proxies in background to not block startup
+                    thread = threading.Thread(target=self.proxy_manager.refresh_proxies, daemon=True)
+                    thread.start()
+            except Exception as e:
+                logger.warning(f"Error loading proxies: {e}. Bot will continue without proxies initially.")
+            
+            logger.info("✅ Bot startup completed successfully")
+        except Exception as e:
+            logger.error(f"Error during startup: {e}")
+            # Don't fail startup - bot should continue running
     
     async def shutdown(self, application):
         """Shutdown tasks"""
@@ -1342,21 +1377,54 @@ class TelegramYouTubeBot:
         logger.info("Bot shutdown completed")
     
     def run(self):
-        """Run the bot"""
-        try:
-            self.application = Application.builder().token(self.token).build()
-            
-            self.setup_handlers()
-            
-            self.application.post_init = self.startup
-            self.application.post_shutdown = self.shutdown
-            
-            logger.info("Starting bot polling...")
-            self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+        """Run the bot with retry logic and proper error handling"""
+        max_retries = 5
+        retry_delay = 5
         
-        except Exception as e:
-            logger.error(f"Fatal error running bot: {e}")
-            traceback.print_exc()
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Initializing bot application (attempt {attempt + 1}/{max_retries})...")
+                self.application = Application.builder().token(self.token).build()
+                
+                self.setup_handlers()
+                
+                self.application.post_init = self.startup
+                self.application.post_shutdown = self.shutdown
+                
+                logger.info("Starting bot polling...")
+                self.application.run_polling(
+                    allowed_updates=Update.ALL_TYPES,
+                    drop_pending_updates=True,
+                    close_loop=False
+                )
+                
+                # If we reach here, bot stopped gracefully
+                logger.info("Bot stopped gracefully")
+                break
+            
+            except TelegramError as e:
+                logger.error(f"Telegram API error: {e}")
+                if "Unauthorized" in str(e) or "token" in str(e).lower():
+                    logger.error("❌ Invalid bot token. Please check your TELEGRAM_BOT_TOKEN.")
+                    logger.error("   The token should be in format: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz")
+                    break  # Don't retry on auth errors
+                elif attempt < max_retries - 1:
+                    logger.warning(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    logger.error("Max retries reached. Giving up.")
+                    traceback.print_exc()
+            
+            except Exception as e:
+                logger.error(f"Unexpected error running bot: {e}")
+                if attempt < max_retries - 1:
+                    logger.warning(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    logger.error("Max retries reached. Giving up.")
+                    traceback.print_exc()
 
 # ============================================================================
 # MAIN ENTRY POINT
@@ -1377,13 +1445,18 @@ def main():
         valid, message = validate_config()
         if not valid:
             logger.error(f"❌ Configuration validation failed: {message}")
+            logger.error("   Please check your configuration and try again.")
             sys.exit(1)
         logger.info(f"✅ Configuration validated: {message}")
     
     if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or BOT_TOKEN == "":
         logger.error("❌ BOT_TOKEN not configured. Please set TELEGRAM_BOT_TOKEN environment variable.")
-        logger.error("   Export it: export TELEGRAM_BOT_TOKEN='your_token_here'")
-        logger.error("   Or add it to a .env file (see .env.example)")
+        logger.error("   ")
+        logger.error("   To fix this:")
+        logger.error("   1. Get a bot token from @BotFather on Telegram")
+        logger.error("   2. Export it: export TELEGRAM_BOT_TOKEN='your_token_here'")
+        logger.error("   3. Or add it to config.py")
+        logger.error("   ")
         sys.exit(1)
     
     logger.info("✅ Bot token configured")
@@ -1396,10 +1469,15 @@ def main():
         bot = TelegramYouTubeBot(BOT_TOKEN)
         logger.info("🚀 Starting bot polling...")
         bot.run()
+        logger.info("✅ Bot exited normally")
     except KeyboardInterrupt:
-        logger.info("\n👋 Bot interrupted by user - Shutting down gracefully")
+        logger.info("\n")
+        logger.info("=" * 80)
+        logger.info("👋 Bot interrupted by user (Ctrl+C)")
+        logger.info("Shutting down gracefully...")
+        logger.info("=" * 80)
     except Exception as e:
-        logger.error(f"❌ Fatal error: {e}")
+        logger.error(f"❌ Fatal error in main: {e}")
         traceback.print_exc()
         sys.exit(1)
 
