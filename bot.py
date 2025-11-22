@@ -31,7 +31,8 @@ from functools import wraps
 import re
 import base64
 
-# Import bot modules
+# Import bot modules (before logging to avoid premature logging)
+MODULES_LOADED = False
 try:
     from utils import (
         LRUCache, Validator, Formatter, SecurityUtils,
@@ -50,10 +51,9 @@ try:
         MESSAGES, Config, validate_config
     )
     MODULES_LOADED = True
-    logging.info("✅ All bot modules loaded successfully")
 except ImportError as e:
     MODULES_LOADED = False
-    logging.warning(f"⚠️ Could not import some modules: {e}. Running in standalone mode.")
+    _import_error = str(e)
 
 # Third-party imports
 import requests
@@ -78,11 +78,11 @@ from telegram.error import TelegramError, BadRequest, Forbidden
 
 # Load configuration - use defaults if config module not available
 if not MODULES_LOADED:
-    BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8057347461:AAHa2nmOZQIMf82V3gmpmcoWfyITsbD8-Sc")
+    BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
     DATABASE_FILE = "telegram_bot.db"
     LOG_FILE = "telegram_bot.log"
     ADMIN_IDS = []
-    OWNER_ID = 5652614329
+    OWNER_ID = 0
     MIN_VIEW_TIME = 5
     MAX_VIEW_TIME = 3600
     DEFAULT_VIEW_TIME = 30
@@ -128,6 +128,12 @@ def setup_logging():
     return logging.getLogger(__name__)
 
 logger = setup_logging()
+
+# Log module loading status after logging is configured
+if MODULES_LOADED:
+    logger.info("✅ All bot modules loaded successfully")
+else:
+    logger.warning(f"⚠️ Could not import some modules: {_import_error}. Running in standalone mode.")
 
 # ============================================================================
 # USER AGENT ROTATION SYSTEM
@@ -803,11 +809,12 @@ class TelegramBotHandlers:
             self.db.add_user(user.id, user.username, user.first_name, user.last_name)
             self.db.update_user_activity(user.id)
             
-            # Use welcome message from config if available
+            # Use welcome message from config if available, otherwise use default
+            welcome_text = ''
             if MODULES_LOADED and hasattr(MESSAGES, '__getitem__'):
                 welcome_text = MESSAGES.get('welcome', '')
             
-            # Fallback message if config not available
+            # Fallback message if config not available or empty
             if not welcome_text:
                 welcome_text = (
                     "🎬 *Welcome to YouTube View Bot!*\n\n"
@@ -1341,8 +1348,6 @@ class TelegramYouTubeBot:
             
             self.setup_handlers()
             
-            self.application.add_handler(CommandHandler("start", self.handlers.start_command))
-            
             self.application.post_init = self.startup
             self.application.post_shutdown = self.shutdown
             
@@ -1375,9 +1380,10 @@ def main():
             sys.exit(1)
         logger.info(f"✅ Configuration validated: {message}")
     
-    if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
+    if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or BOT_TOKEN == "":
         logger.error("❌ BOT_TOKEN not configured. Please set TELEGRAM_BOT_TOKEN environment variable.")
         logger.error("   Export it: export TELEGRAM_BOT_TOKEN='your_token_here'")
+        logger.error("   Or add it to a .env file (see .env.example)")
         sys.exit(1)
     
     logger.info("✅ Bot token configured")

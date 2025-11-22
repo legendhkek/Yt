@@ -17,7 +17,7 @@ from datetime import datetime
 # ============================================================================
 
 # Bot Configuration
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8057347461:AAHa2nmOZQIMf82V3gmpmcoWfyITsbD8-Sc")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 BOT_NAME = os.getenv("BOT_NAME", "YouTube View Bot")
 BOT_VERSION = "2.0"
 BOT_AUTHOR = "@LEGEND_BL"
@@ -38,7 +38,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # Admin Configuration
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()]
-OWNER_ID = int(os.getenv("OWNER_ID", "5652614329"))
+OWNER_ID = int(os.getenv("OWNER_ID", "0")) if os.getenv("OWNER_ID") else 0
 SUPPORT_CHAT_ID = int(os.getenv("SUPPORT_CHAT_ID", "0")) if os.getenv("SUPPORT_CHAT_ID") else None
 
 # ============================================================================
