@@ -1097,7 +1097,6 @@ class TelegramBotHandlers:
     
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle button callbacks"""
-        query = None
         try:
             query = update.callback_query
             if not query:
@@ -1376,7 +1375,9 @@ class TelegramYouTubeBot:
         self.application.add_handler(CommandHandler("proxies", self.admin_commands.proxies_command))
         self.application.add_handler(CommandHandler("refresh_proxies", self.admin_commands.refresh_proxies_command))
         
-        # Callback handlers for buttons outside conversation (with lower priority)
+        # Callback handlers for buttons outside conversation
+        # Using group=1 to give ConversationHandler (in group=0) priority for callback handling
+        # This prevents conflicts when callbacks are used both in conversation and globally
         self.application.add_handler(CallbackQueryHandler(self.handlers.button_callback), group=1)
         
         # Error handler
@@ -1415,7 +1416,13 @@ class TelegramYouTubeBot:
                 if not self.proxy_manager.load_from_cache():
                     logger.info("No cached proxies found, refreshing proxy pool...")
                     # Refresh proxies in background to not block startup
-                    thread = threading.Thread(target=self.proxy_manager.refresh_proxies, daemon=True)
+                    def refresh_proxies_with_error_handling():
+                        try:
+                            self.proxy_manager.refresh_proxies()
+                        except Exception as e:
+                            logger.error(f"Error refreshing proxies in background: {e}")
+                    
+                    thread = threading.Thread(target=refresh_proxies_with_error_handling, daemon=True)
                     thread.start()
             except Exception as e:
                 logger.warning(f"Error loading proxies: {e}. Bot will continue without proxies initially.")
@@ -1447,6 +1454,8 @@ class TelegramYouTubeBot:
                 self.application.post_shutdown = self.shutdown
                 
                 logger.info("Starting bot polling...")
+                # drop_pending_updates=True: Skip processing updates received while bot was offline
+                # close_loop=False: Keep event loop open for potential retries
                 self.application.run_polling(
                     allowed_updates=Update.ALL_TYPES,
                     drop_pending_updates=True,
@@ -1506,12 +1515,12 @@ def main():
     
     if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or BOT_TOKEN == "":
         logger.error("❌ BOT_TOKEN not configured. Please set TELEGRAM_BOT_TOKEN environment variable.")
-        logger.error("   ")
-        logger.error("   To fix this:")
-        logger.error("   1. Get a bot token from @BotFather on Telegram")
-        logger.error("   2. Export it: export TELEGRAM_BOT_TOKEN='your_token_here'")
-        logger.error("   3. Or add it to config.py")
-        logger.error("   ")
+        logger.info("")
+        logger.info("   To fix this:")
+        logger.info("   1. Get a bot token from @BotFather on Telegram")
+        logger.info("   2. Export it: export TELEGRAM_BOT_TOKEN='your_token_here'")
+        logger.info("   3. Or add it to config.py")
+        logger.info("")
         sys.exit(1)
     
     logger.info("✅ Bot token configured")
